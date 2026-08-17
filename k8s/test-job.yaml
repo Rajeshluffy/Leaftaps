@@ -1,0 +1,87 @@
+# One-shot Job — runs the Leaftaps Selenium suite to completion and exits.
+#
+# Prerequisites before `kubectl apply -f k8s/`:
+#   1. Build the image from ../Dockerfile (see its header comment) and load
+#      it into the cluster (the Jenkinsfile does this via `docker save` +
+#      `docker load` into the Minikube node — no external registry needed).
+#   2. Apply namespace.yaml first.
+#   3. Create the leaftaps-data Secret described in
+#      leaftaps-data-secret.example.yaml's header comment.
+#
+# image: is rewritten by the Jenkinsfile (sed) from the "latest" placeholder
+# below to leaftaps-tests:${BUILD_ID} before every apply.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: leaftaps-test-job
+  namespace: leaftaps
+  labels:
+    app: leaftaps-test
+spec:
+  # Single attempt, no retries — a flaky UI test retrying itself via k8s Job
+  # semantics would just mask real failures; retries belong at the
+  # TestNG/RetryEngine layer (already built into autoFrameX), not here.
+  backoffLimit: 0
+  # Auto-delete the Job (and its Pod) 1 hour after it finishes, so results
+  # don't pile up — extract reports before this fires.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: leaftaps-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: leaftaps-test
+          image: leaftaps-tests:latest   # REPLACED by Jenkinsfile via sed
+          imagePullPolicy: Never
+          env:
+            - name: BROWSER
+              value: "chrome"
+            - name: ENVIRONMENT
+              value: "qa"
+            - name: HEADLESS
+              value: "true"
+            - name: SUITE_FILE
+              value: "src/test/resources/suites/regression.xml"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: test-reports
+              mountPath: /app/Leaftaps/target/surefire-reports
+            - name: leaftaps-data
+              mountPath: "/app/Leaftaps/data/Login.xlsx"
+              subPath: "Login.xlsx"
+              readOnly: true
+            - name: leaftaps-data
+              mountPath: "/app/Leaftaps/data/CreateLead.xlsx"
+              subPath: "CreateLead.xlsx"
+              readOnly: true
+            - name: leaftaps-data
+              mountPath: "/app/Leaftaps/data/EditLead.xlsx"
+              subPath: "EditLead.xlsx"
+              readOnly: true
+            - name: leaftaps-data
+              mountPath: "/app/Leaftaps/data/DeleteLead.xlsx"
+              subPath: "DeleteLead.xlsx"
+              readOnly: true
+            - name: leaftaps-data
+              mountPath: "/app/Leaftaps/data/DuplicateLead.xlsx"
+              subPath: "DuplicateLead.xlsx"
+              readOnly: true
+      volumes:
+        # hostPath on the Minikube node — the Jenkinsfile pulls reports out
+        # via `docker exec minikube tar -c -C /tmp surefire-reports`, so it
+        # must stay in sync with that command's path.
+        - name: test-reports
+          hostPath:
+            path: /tmp/surefire-reports
+            type: DirectoryOrCreate
+        - name: leaftaps-data
+          secret:
+            secretName: leaftaps-data
