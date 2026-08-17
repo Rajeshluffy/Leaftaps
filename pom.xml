@@ -1,0 +1,52 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.leaftaps</groupId>
+    <artifactId>Leaftaps</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>16</maven.compiler.source>
+        <maven.compiler.target>16</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <suiteXmlFile>src/test/resources/suites/regression.xml</suiteXmlFile>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <!-- Default suite; override at the command line with:
+                         mvn test -DsuiteXmlFile=<other>.xml -->
+                    <suiteXmlFiles>
+                        <suiteXmlFile>${suiteXmlFile}</suiteXmlFile>
+                    </suiteXmlFiles>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <dependencies>
+        <!-- autoFrameX is now an 8-module Maven reactor (TD-20) — the old single
+             "autoFrameX:autoFrameX" artifact no longer exists. autoframex-selenium
+             pulls in autoframex-core transitively, which covers every framework
+             class this project imports directly (ProjectSpecificMethods,
+             ConfigurationManager, ProjectAppConfiguration, Locators, ...). -->
+        <dependency>
+            <groupId>autoFrameX</groupId>
+            <artifactId>autoframex-selenium</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!-- design.patterns.database.manager.DBManager (LeafTapsDatabasePage) now
+             lives in its own module — DB access is a distinct-enough concern that
+             not every consumer needs mysql-connector-j transitively. -->
+        <dependency>
+            <groupId>autoFrameX</groupId>
+            <artifactId>autoframex-database</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+    </dependencies>
+</project>

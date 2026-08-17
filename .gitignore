@@ -1,0 +1,38 @@
+#secrets
+/data/
+
+# Maven target folder
+/target/
+
+# Eclipse project files
+.classpath
+.project
+/.settings/
+bin/
+
+# IntelliJ IDEA files
+.idea/
+*.iml
+*.iws
+
+# VS Code files
+.vscode/
+
+# Test Automation generated outputs
+/test-output/
+/reports/
+/logs/
+/downloads/
+*.log
+
+# Compiled class files & archives
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+
+# OS generated files
+.DS_Store
+Thumbs.db
