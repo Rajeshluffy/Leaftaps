@@ -174,12 +174,18 @@ pipeline {
                         sh '''
                             ${KUBECTL} delete job leaftaps-test-job-g1 -n leaftaps --ignore-not-found=true
                             cp Leaftaps/k8s/test-job.yaml Leaftaps/k8s/test-job-g1.yaml
+                            
                             sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job-g1.yaml
                             sed -i "s/name: leaftaps-test-job/name: leaftaps-test-job-g1/" Leaftaps/k8s/test-job-g1.yaml
                             sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g1#" Leaftaps/k8s/test-job-g1.yaml
                             sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group1.xml\\"#" Leaftaps/k8s/test-job-g1.yaml
-                            cat Leaftaps/k8s/test-job-g1.yaml | ${KUBECTL} apply -f -
+                            
+                            # WORKAROUND: Copy the generated YAML to minikube and apply it from there
+                            docker cp Leaftaps/k8s/test-job-g1.yaml minikube:/test-job-g1.yaml
+                            ${KUBECTL} apply -f /test-job-g1.yaml
+                            
                             ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g1 -n leaftaps --timeout=600s || true
+                            
                             mkdir -p Leaftaps/target/group1
                             docker exec minikube tar -c -C /tmp surefire-reports-g1 | tar -x -C Leaftaps/target/group1 --strip-components=0
                         '''
@@ -190,12 +196,18 @@ pipeline {
                         sh '''
                             ${KUBECTL} delete job leaftaps-test-job-g2 -n leaftaps --ignore-not-found=true
                             cp Leaftaps/k8s/test-job.yaml Leaftaps/k8s/test-job-g2.yaml
+                            
                             sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job-g2.yaml
                             sed -i "s/name: leaftaps-test-job/name: leaftaps-test-job-g2/" Leaftaps/k8s/test-job-g2.yaml
                             sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g2#" Leaftaps/k8s/test-job-g2.yaml
                             sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group2.xml\\"#" Leaftaps/k8s/test-job-g2.yaml
-                            cat Leaftaps/k8s/test-job-g2.yaml | ${KUBECTL} apply -f -
+                            
+                            # WORKAROUND: Copy the generated YAML to minikube and apply it from there
+                            docker cp Leaftaps/k8s/test-job-g2.yaml minikube:/test-job-g2.yaml
+                            ${KUBECTL} apply -f /test-job-g2.yaml
+                            
                             ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g2 -n leaftaps --timeout=600s || true
+                            
                             mkdir -p Leaftaps/target/group2
                             docker exec minikube tar -c -C /tmp surefire-reports-g2 | tar -x -C Leaftaps/target/group2 --strip-components=0
                         '''
