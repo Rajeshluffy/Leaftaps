@@ -9,12 +9,16 @@
 //      DeleteLead/DuplicateLead.xlsx) from a Jenkins Secret file credential —
 //      these are git-ignored (see Leaftaps/.gitignore, "#secrets") and never
 //      baked into the image
-//   3. Build the Docker image (installs the autoFrameX reactor, then
+//   3. Build ONE Docker image (installs the autoFrameX reactor, then
 //      Leaftaps, inside the image — see Dockerfile)
 //   4. Load the image into the Minikube node (no external registry)
 //   5. Sync the Excel fixtures into a K8s Secret
-//   6. Deploy k8s/test-job.yaml as a one-shot Job and wait for completion
-//   7. Pull surefire-reports back out and publish JUnit results
+//   6. Deploy TWO k8s Jobs in parallel from the same image, each pinned to
+//      a different TestNG suite file (group1.xml / group2.xml) via the
+//      SUITE_FILE env var and writing reports to its own hostPath dir
+//      (/tmp/surefire-reports-g1, -g2) so they can't clobber each other
+//   7. Wait for both, pull both sets of surefire-reports back out, and
+//      publish a single merged JUnit result
 //
 // First-time setup checklist
 // ──────────────────────────
@@ -150,28 +154,44 @@ pipeline {
             }
         }
 
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh '''
-                    ${KUBECTL} delete job leaftaps-test-job -n leaftaps --ignore-not-found=true
-                    sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job.yaml
-                    sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"${SUITE_FILE}\\"#" Leaftaps/k8s/test-job.yaml
-                    cat Leaftaps/k8s/test-job.yaml | ${KUBECTL} apply -f -
-                '''
-            }
-        }
-
-        stage('Collect Test Results') {
-            steps {
-                sh '''
-                    # Wait for the test job to finish (pass or fail)
-                    ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job -n leaftaps --timeout=600s || true
-
-                    mkdir -p Leaftaps/target
-
-                    # Stream surefire-reports out of the Minikube node into the Jenkins workspace
-                    docker exec minikube tar -c -C /tmp surefire-reports | tar -x -C Leaftaps/target
-                '''
+        // Both groups run from the SAME image built above (only the suite file
+        // differs), so no second build/load is needed — just two Jobs deployed
+        // and awaited side by side, each writing to its own hostPath directory
+        // on the Minikube node so they can't clobber each other's reports.
+        stage('Deploy & Run Parallel Groups') {
+            parallel {
+                stage('Group 1: Login/Logout/Create/Edit') {
+                    steps {
+                        sh '''
+                            ${KUBECTL} delete job leaftaps-test-job-g1 -n leaftaps --ignore-not-found=true
+                            cp Leaftaps/k8s/test-job.yaml Leaftaps/k8s/test-job-g1.yaml
+                            sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job-g1.yaml
+                            sed -i "s/name: leaftaps-test-job/name: leaftaps-test-job-g1/" Leaftaps/k8s/test-job-g1.yaml
+                            sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g1#" Leaftaps/k8s/test-job-g1.yaml
+                            sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group1.xml\\"#" Leaftaps/k8s/test-job-g1.yaml
+                            cat Leaftaps/k8s/test-job-g1.yaml | ${KUBECTL} apply -f -
+                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g1 -n leaftaps --timeout=600s || true
+                            mkdir -p Leaftaps/target/group1
+                            docker exec minikube tar -c -C /tmp surefire-reports-g1 | tar -x -C Leaftaps/target/group1 --strip-components=0
+                        '''
+                    }
+                }
+                stage('Group 2: Delete/Duplicate/Verify') {
+                    steps {
+                        sh '''
+                            ${KUBECTL} delete job leaftaps-test-job-g2 -n leaftaps --ignore-not-found=true
+                            cp Leaftaps/k8s/test-job.yaml Leaftaps/k8s/test-job-g2.yaml
+                            sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job-g2.yaml
+                            sed -i "s/name: leaftaps-test-job/name: leaftaps-test-job-g2/" Leaftaps/k8s/test-job-g2.yaml
+                            sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g2#" Leaftaps/k8s/test-job-g2.yaml
+                            sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group2.xml\\"#" Leaftaps/k8s/test-job-g2.yaml
+                            cat Leaftaps/k8s/test-job-g2.yaml | ${KUBECTL} apply -f -
+                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g2 -n leaftaps --timeout=600s || true
+                            mkdir -p Leaftaps/target/group2
+                            docker exec minikube tar -c -C /tmp surefire-reports-g2 | tar -x -C Leaftaps/target/group2 --strip-components=0
+                        '''
+                    }
+                }
             }
         }
 
@@ -179,9 +199,12 @@ pipeline {
 
     post {
         always {
-            junit allowEmptyResults: true, testResults: 'Leaftaps/target/surefire-reports/*.xml'
-            archiveArtifacts artifacts: 'Leaftaps/target/surefire-reports/**', allowEmptyArchive: true
-            sh '${KUBECTL} delete job leaftaps-test-job -n leaftaps --ignore-not-found=true'
+            junit allowEmptyResults: true, testResults: 'Leaftaps/target/group*/surefire-reports*/*.xml'
+            archiveArtifacts artifacts: 'Leaftaps/target/group*/**', allowEmptyArchive: true
+            sh '''
+                ${KUBECTL} delete job leaftaps-test-job-g1 -n leaftaps --ignore-not-found=true
+                ${KUBECTL} delete job leaftaps-test-job-g2 -n leaftaps --ignore-not-found=true
+            '''
         }
         success { echo 'Pipeline complete — Leaftaps suite passed.' }
         failure { echo 'Pipeline failed — check Console Output and archived surefire-reports.' }

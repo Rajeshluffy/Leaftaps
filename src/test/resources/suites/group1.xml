@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!--
+    Parallel split of regression.xml — Group 1 of 2 (Login/Logout/Create/Edit).
+    Runs as its own Kubernetes Job alongside group2.xml so the full regression
+    suite completes in roughly half the wall-clock time. See group2.xml for
+    the other half.
+-->
+<suite name="Regression Group 1" parallel="classes" thread-count="4" verbose="2">
+    <parameter name="configClass" value="com.leaftaps.config.data.LeafTapConfiguration"/>
+    <parameter name="environment" value="qa"/>
+    <parameter name="browser"      value="chrome"/>
+    <parameter name="maxPoolSize"  value="2"/>
+    <test name="Regression Group 1">
+        <classes>
+            <class name="com.leaftaps.testcases.TC001_VerifyLogin"/>
+            <class name="com.leaftaps.testcases.TC002_VerifyLogout"/>
+            <class name="com.leaftaps.testcases.TC003_CreateLead"/>
+            <class name="com.leaftaps.testcases.TC004_EditLead"/>
+        </classes>
+    </test>
+</suite>
