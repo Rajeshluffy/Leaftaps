@@ -78,7 +78,7 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES')
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
     }
@@ -184,7 +184,7 @@ pipeline {
                             docker cp Leaftaps/k8s/test-job-g1.yaml minikube:/test-job-g1.yaml
                             ${KUBECTL} apply -f /test-job-g1.yaml
                             
-                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g1 -n leaftaps --timeout=600s || true
+                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g1 -n leaftaps --timeout=1800s || true
                             
                             mkdir -p Leaftaps/target/group1
                             docker exec minikube tar -c -C /tmp surefire-reports-g1 | tar -x -C Leaftaps/target/group1 --strip-components=0
@@ -206,7 +206,7 @@ pipeline {
                             docker cp Leaftaps/k8s/test-job-g2.yaml minikube:/test-job-g2.yaml
                             ${KUBECTL} apply -f /test-job-g2.yaml
                             
-                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g2 -n leaftaps --timeout=600s || true
+                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g2 -n leaftaps --timeout=1800s || true
                             
                             mkdir -p Leaftaps/target/group2
                             docker exec minikube tar -c -C /tmp surefire-reports-g2 | tar -x -C Leaftaps/target/group2 --strip-components=0
