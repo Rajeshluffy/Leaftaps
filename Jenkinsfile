@@ -140,25 +140,26 @@ pipeline {
         stage('Sync Test Data Secret') {
             steps {
                 sh '''
-            # 1. Copy the namespace YAML into the minikube container
-            docker cp Leaftaps/k8s/namespace.yaml minikube:/tmp/namespace.yaml
+            # 1. Copy namespace YAML to the root directory (avoids tmpfs issues)
+            docker cp Leaftaps/k8s/namespace.yaml minikube:/namespace.yaml
             
-            # 2. Apply it directly from the file inside the container
-            ${KUBECTL} apply -f /tmp/namespace.yaml
+            # 2. Apply it directly from the root path
+            ${KUBECTL} apply -f /namespace.yaml
 
-            # 3. Prepare the data directory
-            docker exec minikube rm -rf /tmp/leaftaps-data
-            docker exec minikube mkdir -p /tmp/leaftaps-data
+            # 3. Use a safe root path for the Excel files as well
+            docker exec minikube rm -rf /leaftaps-data
+            docker exec minikube mkdir -p /leaftaps-data
             
-            # 4. Copy all Excel files into the minikube container
+            # 4. Copy all Excel files into the new directory
             for f in Leaftaps/data/*.xlsx; do
-                docker cp "$f" minikube:/tmp/leaftaps-data/
+                docker cp "$f" minikube:/leaftaps-data/
             done
 
-            # 5. Recreate the Kubernetes secret
+            # 5. Recreate the Kubernetes secret using the new path
             ${KUBECTL} delete secret leaftaps-data -n leaftaps --ignore-not-found=true
-            ${KUBECTL} create secret generic leaftaps-data -n leaftaps --from-file=/tmp/leaftaps-data
+            ${KUBECTL} create secret generic leaftaps-data -n leaftaps --from-file=/leaftaps-data
         '''
+    
             }
         }
 
