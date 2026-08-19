@@ -1,84 +1,22 @@
 // ============================================================================
 // Leaftaps — Jenkins Declarative Pipeline (Docker + Minikube + K8s Job)
-//
-// Flow:
-//   1. Checkout Leaftaps and autoFrameX (sibling checkouts — Leaftaps depends
-//      on autoFrameX's autoframex-selenium/autoframex-database modules,
-//      which only exist via local Maven install; see Dockerfile header)
-//   2. Unpack the Excel data-provider fixtures (Login/CreateLead/EditLead/
-//      DeleteLead/DuplicateLead.xlsx) from a Jenkins Secret file credential —
-//      these are git-ignored (see Leaftaps/.gitignore, "#secrets") and never
-//      baked into the image
-//   3. Build ONE Docker image (installs the autoFrameX reactor, then
-//      Leaftaps, inside the image — see Dockerfile)
-//   4. Load the image into the Minikube node (no external registry)
-//   5. Sync the Excel fixtures into a K8s Secret
-//   6. Deploy TWO k8s Jobs in parallel from the same image, each pinned to
-//      a different TestNG suite file (group1.xml / group2.xml) via the
-//      SUITE_FILE env var and writing reports to its own hostPath dir
-//      (/tmp/surefire-reports-g1, -g2) so they can't clobber each other
-//   7. Wait for both, pull both sets of surefire-reports back out, and
-//      publish a single merged JUnit result
-//
-// First-time setup checklist
-// ──────────────────────────
-// Jenkins → Manage Jenkins → Credentials → (global) → Add Credentials
-//   [ ] Secret file, ID "leaftaps-data-zip" — a .zip containing
-//       Login.xlsx, CreateLead.xlsx, EditLead.xlsx, DeleteLead.xlsx,
-//       DuplicateLead.xlsx at its root (matching Leaftaps/data/*.xlsx today)
-//
-// Jenkins agent requirements
-//   [ ] Docker CLI + a running Minikube node named "minikube" reachable via
-//       `docker exec minikube ...` (same setup as the GPN/serivcenow
-//       pipelines already running in this environment)
-//   [ ] `unzip` available on the agent
-//
-// Jenkins → New Item → Pipeline
-//   [ ] Pipeline Definition : Pipeline script from SCM
-//   [ ] SCM                 : Git → URL of the Leaftaps repository
-//   [ ] Script Path         : Jenkinsfile   (this file)
 // ============================================================================
 
 pipeline {
-
     agent any
 
     parameters {
-        choice(
-            name: 'BROWSER',
-            choices: ['chrome', 'firefox', 'edge'],
-            description: 'Browser to use for UI test execution'
-        )
-        choice(
-            name: 'ENVIRONMENT',
-            choices: ['dev', 'qa', 'prod'],
-            description: 'Target environment'
-        )
-        booleanParam(
-            name: 'HEADLESS',
-            defaultValue: true,
-            description: 'Run browser in headless mode (recommended for CI)'
-        )
-        string(
-            name:         'SUITE_FILE',
-            defaultValue: 'src/test/resources/suites/regression.xml',
-            description:  'TestNG suite XML file to execute (relative to the Leaftaps/ directory)'
-        )
-        string(
-            name:         'AUTOFRAMEX_REPO',
-            defaultValue: 'https://github.com/Rajeshluffy/autoFrameX.git',
-            description:  'Git URL of the autoFrameX framework repository'
-        )
-        string(
-            name:         'AUTOFRAMEX_BRANCH',
-            defaultValue: 'framework-3.1',
-            description:  'Branch or tag to checkout for autoFrameX'
-        )
+        choice(name: 'BROWSER', choices: ['chrome', 'firefox', 'edge'], description: 'Browser to use for UI test execution')
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Target environment')
+        booleanParam(name: 'HEADLESS', defaultValue: true, description: 'Run browser in headless mode (recommended for CI)')
+        string(name: 'SUITE_FILE', defaultValue: 'src/test/resources/suites/regression.xml', description: 'TestNG suite XML file to execute')
+        string(name: 'AUTOFRAMEX_REPO', defaultValue: 'https://github.com/Rajeshluffy/autoFrameX.git', description: 'Git URL of the autoFrameX framework repository')
+        string(name: 'AUTOFRAMEX_BRANCH', defaultValue: 'framework-3.1', description: 'Branch or tag to checkout for autoFrameX')
     }
 
     options {
         timestamps()
-        timeout(time: 45, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES') // Increased pipeline timeout
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
     }
@@ -88,12 +26,9 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout Leaftaps') {
             steps {
-                dir('Leaftaps') {
-                    checkout scm
-                }
+                dir('Leaftaps') { checkout scm }
             }
         }
 
@@ -118,9 +53,6 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                // Build context = workspace root, which now contains both
-                // Leaftaps/ and autoFrameX/ as siblings — see Dockerfile
-                // header comment for why.
                 sh 'docker build --platform linux/amd64 --provenance=false -f Leaftaps/Dockerfile -t leaftaps-tests:${BUILD_ID} .'
             }
         }
@@ -140,33 +72,22 @@ pipeline {
         stage('Sync Test Data Secret') {
             steps {
                 sh '''
-            # 1. Copy namespace YAML to the root directory
-            docker cp Leaftaps/k8s/namespace.yaml minikube:/namespace.yaml
-            
-            # 2. Apply it directly from the root path
-            ${KUBECTL} apply -f /namespace.yaml
+                    docker cp Leaftaps/k8s/namespace.yaml minikube:/namespace.yaml
+                    ${KUBECTL} apply -f /namespace.yaml
 
-            # 3. Create the directory inside minikube
-            docker exec minikube rm -rf /leaftaps-data
-            docker exec minikube mkdir -p /leaftaps-data
-            
-            # 4. Copy Excel files from the CORRECT extracted path (data/data)
-            for f in Leaftaps/data/data/*.xlsx; do
-                docker cp "$f" minikube:/leaftaps-data/
-            done
+                    docker exec minikube rm -rf /leaftaps-data
+                    docker exec minikube mkdir -p /leaftaps-data
+                    
+                    for f in Leaftaps/data/data/*.xlsx; do
+                        docker cp "$f" minikube:/leaftaps-data/
+                    done
 
-            # 5. Recreate the Kubernetes secret
-            ${KUBECTL} delete secret leaftaps-data -n leaftaps --ignore-not-found=true
-            ${KUBECTL} create secret generic leaftaps-data -n leaftaps --from-file=/leaftaps-data
-        '''
-    
+                    ${KUBECTL} delete secret leaftaps-data -n leaftaps --ignore-not-found=true
+                    ${KUBECTL} create secret generic leaftaps-data -n leaftaps --from-file=/leaftaps-data
+                '''
             }
         }
 
-        // Both groups run from the SAME image built above (only the suite file
-        // differs), so no second build/load is needed — just two Jobs deployed
-        // and awaited side by side, each writing to its own hostPath directory
-        // on the Minikube node so they can't clobber each other's reports.
         stage('Deploy & Run Parallel Groups') {
             parallel {
                 stage('Group 1: Login/Logout/Create/Edit') {
@@ -180,10 +101,10 @@ pipeline {
                             sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g1#" Leaftaps/k8s/test-job-g1.yaml
                             sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group1.xml\\"#" Leaftaps/k8s/test-job-g1.yaml
                             
-                            # WORKAROUND: Copy the generated YAML to minikube and apply it from there
                             docker cp Leaftaps/k8s/test-job-g1.yaml minikube:/test-job-g1.yaml
                             ${KUBECTL} apply -f /test-job-g1.yaml
                             
+                            # UPDATED TIMEOUT: 1800 seconds (30 minutes)
                             ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g1 -n leaftaps --timeout=1800s || true
                             
                             mkdir -p Leaftaps/target/group1
@@ -202,10 +123,10 @@ pipeline {
                             sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g2#" Leaftaps/k8s/test-job-g2.yaml
                             sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group2.xml\\"#" Leaftaps/k8s/test-job-g2.yaml
                             
-                            # WORKAROUND: Copy the generated YAML to minikube and apply it from there
                             docker cp Leaftaps/k8s/test-job-g2.yaml minikube:/test-job-g2.yaml
                             ${KUBECTL} apply -f /test-job-g2.yaml
                             
+                            # UPDATED TIMEOUT: 1800 seconds (30 minutes)
                             ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g2 -n leaftaps --timeout=1800s || true
                             
                             mkdir -p Leaftaps/target/group2
@@ -215,13 +136,26 @@ pipeline {
                 }
             }
         }
-
     }
 
     post {
         always {
+            // CI DEBUGGING: Dump logs to Jenkins console before cleaning up
+            echo "======================================================="
+            echo "FETCHING KUBERNETES POD LOGS FOR DEBUGGING..."
+            echo "======================================================="
+            sh '''
+                echo "--- GROUP 1 LOGS ---"
+                ${KUBECTL} logs -l job-name=leaftaps-test-job-g1 -n leaftaps --tail=200 || echo "Could not fetch G1 logs"
+                
+                echo "--- GROUP 2 LOGS ---"
+                ${KUBECTL} logs -l job-name=leaftaps-test-job-g2 -n leaftaps --tail=200 || echo "Could not fetch G2 logs"
+            '''
+            echo "======================================================="
+
             junit allowEmptyResults: true, testResults: 'Leaftaps/target/group*/surefire-reports*/*.xml'
             archiveArtifacts artifacts: 'Leaftaps/target/group*/**', allowEmptyArchive: true
+            
             sh '''
                 ${KUBECTL} delete job leaftaps-test-job-g1 -n leaftaps --ignore-not-found=true
                 ${KUBECTL} delete job leaftaps-test-job-g2 -n leaftaps --ignore-not-found=true
@@ -230,5 +164,4 @@ pipeline {
         success { echo 'Pipeline complete — Leaftaps suite passed.' }
         failure { echo 'Pipeline failed — check Console Output and archived surefire-reports.' }
     }
-
 }
