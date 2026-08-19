@@ -36,11 +36,18 @@ spec:
           image: leaftaps-tests:latest   # REPLACED by Jenkinsfile via sed
           imagePullPolicy: Never
           # OVERRIDING entrypoint to copy read-only secrets into the writable workspace first
+          #
+          # NOTE: no "clean" goal here on purpose — target/surefire-reports is a
+          # K8s hostPath mount point (see volumeMounts below); maven-clean-plugin
+          # cannot delete a mount point itself, only its contents, so "mvn clean
+          # test" fails every run before any test executes. Each pod is a fresh
+          # container anyway, so there's nothing to clean.
           command: ["/bin/sh", "-c"]
           args:
             - |
+              mkdir -p /app/Leaftaps/data
               cp /mnt/secrets/* /app/Leaftaps/data/
-              mvn clean test -Dsurefire.suiteXmlFiles=${SUITE_FILE}
+              mvn test -Dsurefire.suiteXmlFiles=${SUITE_FILE}
           env:
             - name: BROWSER
               value: "chrome"

@@ -103,10 +103,20 @@ pipeline {
                             
                             docker cp Leaftaps/k8s/test-job-g1.yaml minikube:/test-job-g1.yaml
                             ${KUBECTL} apply -f /test-job-g1.yaml
-                            
-                            # UPDATED TIMEOUT: 1800 seconds (30 minutes)
-                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g1 -n leaftaps --timeout=1800s || true
-                            
+
+                            # Poll instead of a blind 'kubectl wait --for=condition=complete': that
+                            # condition never fires for a FAILED job, so it would burn the entire
+                            # timeout doing nothing even when the pod died in the first few seconds.
+                            # Exit the moment either Complete or Failed shows up (max ~10 min).
+                            for i in $(seq 1 60); do
+                                STATUS=$(${KUBECTL} get job/leaftaps-test-job-g1 -n leaftaps -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
+                                if [ "$STATUS" = "Complete" ] || [ "$STATUS" = "Failed" ]; then
+                                    echo "Group 1 job reached status: $STATUS after ${i}0s"
+                                    break
+                                fi
+                                sleep 10
+                            done
+
                             mkdir -p Leaftaps/target/group1
                             docker exec minikube tar -c -C /tmp surefire-reports-g1 | tar -x -C Leaftaps/target/group1 --strip-components=0
                         '''
@@ -125,10 +135,18 @@ pipeline {
                             
                             docker cp Leaftaps/k8s/test-job-g2.yaml minikube:/test-job-g2.yaml
                             ${KUBECTL} apply -f /test-job-g2.yaml
-                            
-                            # UPDATED TIMEOUT: 1800 seconds (30 minutes)
-                            ${KUBECTL} wait --for=condition=complete job/leaftaps-test-job-g2 -n leaftaps --timeout=1800s || true
-                            
+
+                            # Same fast-exit poll as Group 1 — see its comment for why this
+                            # replaces 'kubectl wait --for=condition=complete'.
+                            for i in $(seq 1 60); do
+                                STATUS=$(${KUBECTL} get job/leaftaps-test-job-g2 -n leaftaps -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
+                                if [ "$STATUS" = "Complete" ] || [ "$STATUS" = "Failed" ]; then
+                                    echo "Group 2 job reached status: $STATUS after ${i}0s"
+                                    break
+                                fi
+                                sleep 10
+                            done
+
                             mkdir -p Leaftaps/target/group2
                             docker exec minikube tar -c -C /tmp surefire-reports-g2 | tar -x -C Leaftaps/target/group2 --strip-components=0
                         '''
