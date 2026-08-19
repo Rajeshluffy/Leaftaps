@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!--
+    Fastest possible pipeline sanity check — one test, one browser session.
+    Use this first to confirm Docker build -> minikube load -> K8s Job ->
+    report collection all work end-to-end, before running the full
+    regression.xml suite (6 tests) or the smoke suite (3 tests).
+-->
+<suite name="Single Login Sanity Check" parallel="none" verbose="2">
+    <parameter name="configClass" value="com.leaftaps.config.data.LeafTapConfiguration"/>
+    <parameter name="environment" value="qa"/>
+    <parameter name="browser"      value="chrome"/>
+    <parameter name="maxPoolSize"  value="1"/>
+    <parameter name="headless" value="true"/>
+    <test name="Login Sanity">
+        <classes>
+            <class name="com.leaftaps.testcases.TC001_VerifyLogin"/>
+        </classes>
+    </test>
+</suite>
