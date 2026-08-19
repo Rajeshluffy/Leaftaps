@@ -35,6 +35,12 @@ spec:
         - name: leaftaps-test
           image: leaftaps-tests:latest   # REPLACED by Jenkinsfile via sed
           imagePullPolicy: Never
+          # OVERRIDING entrypoint to copy read-only secrets into the writable workspace first
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              cp /mnt/secrets/* /app/Leaftaps/data/
+              mvn clean test -Dsurefire.suiteXmlFiles=${SUITE_FILE}
           env:
             - name: BROWSER
               value: "chrome"
@@ -54,26 +60,13 @@ spec:
           volumeMounts:
             - name: test-reports
               mountPath: /app/Leaftaps/target/surefire-reports
-            - name: leaftaps-data
-              mountPath: "/app/Leaftaps/data/Login.xlsx"
-              subPath: "Login.xlsx"
+            # 1. Mount secrets to a temporary read-only path
+            - name: leaftaps-data-temp
+              mountPath: /mnt/secrets
               readOnly: true
-            - name: leaftaps-data
-              mountPath: "/app/Leaftaps/data/CreateLead.xlsx"
-              subPath: "CreateLead.xlsx"
-              readOnly: true
-            - name: leaftaps-data
-              mountPath: "/app/Leaftaps/data/EditLead.xlsx"
-              subPath: "EditLead.xlsx"
-              readOnly: true
-            - name: leaftaps-data
-              mountPath: "/app/Leaftaps/data/DeleteLead.xlsx"
-              subPath: "DeleteLead.xlsx"
-              readOnly: true
-            - name: leaftaps-data
-              mountPath: "/app/Leaftaps/data/DuplicateLead.xlsx"
-              subPath: "DuplicateLead.xlsx"
-              readOnly: true
+            # 2. Mount shared memory to prevent Chrome DevToolsActivePort crashes
+            - name: dshm
+              mountPath: /dev/shm
       volumes:
         # hostPath on the Minikube node — the Jenkinsfile pulls reports out
         # via `docker exec minikube tar -c -C /tmp surefire-reports`, so it
@@ -82,6 +75,10 @@ spec:
           hostPath:
             path: /tmp/surefire-reports
             type: DirectoryOrCreate
-        - name: leaftaps-data
+        - name: leaftaps-data-temp
           secret:
             secretName: leaftaps-data
+        # Shared memory volume for Dockerized Chrome
+        - name: dshm
+          emptyDir:
+            medium: Memory
