@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
-<suite name="Regression Test Suite" parallel="classes" thread-count="4" verbose="2">
+<!--
+    parallel="none" / maxPoolSize=1 deliberately, not the original
+    parallel="classes" thread-count="4" / maxPoolSize=2: this pipeline's
+    minikube node is capped at ~3GB total RAM (see Jenkinsfile history —
+    this machine only has ~5.85GB physical RAM). Two concurrent headless
+    Chrome instances under that ceiling triggered repeated
+    "SessionNotCreatedException: unable to connect to renderer" failures
+    (Chrome's renderer process getting starved/OOM-killed). One test, one
+    Chrome instance, at a time is the trade-off that's actually stable here.
+-->
+<suite name="Regression Test Suite" parallel="none" verbose="2">
     <parameter name="configClass" value="com.leaftaps.config.data.LeafTapConfiguration"/>
     <parameter name="environment" value="qa"/>
     <parameter name="browser"      value="chrome"/>
-    <parameter name="maxPoolSize"  value="2"/>
+    <parameter name="maxPoolSize"  value="1"/>
 	<parameter name="headless" value="true"/>
     <test name="Full Regression">
         <classes>

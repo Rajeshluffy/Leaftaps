@@ -111,11 +111,17 @@ pipeline {
                     # Poll instead of a blind 'kubectl wait --for=condition=complete': that
                     # condition never fires for a FAILED job, so it would burn the entire
                     # timeout doing nothing even when the pod died in the first few seconds.
-                    # Exit the moment either Complete or Failed shows up (max ~10 min).
+                    #
+                    # Check .status.succeeded / .status.failed counts, not conditions[0].type:
+                    # Job conditions can include an intermediate "FailureTarget" type that
+                    # appears before the final "Failed" condition, and array order isn't
+                    # guaranteed — a type-string match on index 0 missed it entirely and kept
+                    # polling for the full 10 minutes even after the job had already failed.
                     for i in $(seq 1 60); do
-                        STATUS=$(${KUBECTL} get job/leaftaps-test-job -n leaftaps -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
-                        if [ "$STATUS" = "Complete" ] || [ "$STATUS" = "Failed" ]; then
-                            echo "Job reached status: $STATUS after ${i}0s"
+                        SUCCEEDED=$(${KUBECTL} get job/leaftaps-test-job -n leaftaps -o jsonpath='{.status.succeeded}' 2>/dev/null)
+                        FAILED=$(${KUBECTL} get job/leaftaps-test-job -n leaftaps -o jsonpath='{.status.failed}' 2>/dev/null)
+                        if [ "$SUCCEEDED" = "1" ] || [ "$FAILED" = "1" ]; then
+                            echo "Job finished (succeeded=$SUCCEEDED failed=$FAILED) after ${i}0s"
                             break
                         fi
                         sleep 10
