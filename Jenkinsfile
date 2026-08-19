@@ -88,70 +88,42 @@ pipeline {
             }
         }
 
-        stage('Deploy & Run Parallel Groups') {
-            parallel {
-                stage('Group 1: Login/Logout/Create/Edit') {
-                    steps {
-                        sh '''
-                            ${KUBECTL} delete job leaftaps-test-job-g1 -n leaftaps --ignore-not-found=true
-                            cp Leaftaps/k8s/test-job.yaml Leaftaps/k8s/test-job-g1.yaml
-                            
-                            sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job-g1.yaml
-                            sed -i "s/name: leaftaps-test-job/name: leaftaps-test-job-g1/" Leaftaps/k8s/test-job-g1.yaml
-                            sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g1#" Leaftaps/k8s/test-job-g1.yaml
-                            sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group1.xml\\"#" Leaftaps/k8s/test-job-g1.yaml
-                            
-                            docker cp Leaftaps/k8s/test-job-g1.yaml minikube:/test-job-g1.yaml
-                            ${KUBECTL} apply -f /test-job-g1.yaml
+        // Reverted from parallel groups back to a single sequential Job — this
+        // machine has ~5.85GB total RAM, and two simultaneous headless-Chrome +
+        // JVM pods starved minikube's control plane badly enough to crash the
+        // API server mid-run (see build history). Not worth the instability
+        // here; runs the full regression.xml suite in one pod instead.
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                    ${KUBECTL} delete job leaftaps-test-job -n leaftaps --ignore-not-found=true
+                    sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job.yaml
+                    sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"${SUITE_FILE}\\"#" Leaftaps/k8s/test-job.yaml
+                    docker cp Leaftaps/k8s/test-job.yaml minikube:/test-job.yaml
+                    ${KUBECTL} apply -f /test-job.yaml
+                '''
+            }
+        }
 
-                            # Poll instead of a blind 'kubectl wait --for=condition=complete': that
-                            # condition never fires for a FAILED job, so it would burn the entire
-                            # timeout doing nothing even when the pod died in the first few seconds.
-                            # Exit the moment either Complete or Failed shows up (max ~10 min).
-                            for i in $(seq 1 60); do
-                                STATUS=$(${KUBECTL} get job/leaftaps-test-job-g1 -n leaftaps -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
-                                if [ "$STATUS" = "Complete" ] || [ "$STATUS" = "Failed" ]; then
-                                    echo "Group 1 job reached status: $STATUS after ${i}0s"
-                                    break
-                                fi
-                                sleep 10
-                            done
+        stage('Collect Test Results') {
+            steps {
+                sh '''
+                    # Poll instead of a blind 'kubectl wait --for=condition=complete': that
+                    # condition never fires for a FAILED job, so it would burn the entire
+                    # timeout doing nothing even when the pod died in the first few seconds.
+                    # Exit the moment either Complete or Failed shows up (max ~10 min).
+                    for i in $(seq 1 60); do
+                        STATUS=$(${KUBECTL} get job/leaftaps-test-job -n leaftaps -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
+                        if [ "$STATUS" = "Complete" ] || [ "$STATUS" = "Failed" ]; then
+                            echo "Job reached status: $STATUS after ${i}0s"
+                            break
+                        fi
+                        sleep 10
+                    done
 
-                            mkdir -p Leaftaps/target/group1
-                            docker exec minikube tar -c -C /tmp surefire-reports-g1 | tar -x -C Leaftaps/target/group1 --strip-components=0
-                        '''
-                    }
-                }
-                stage('Group 2: Delete/Duplicate/Verify') {
-                    steps {
-                        sh '''
-                            ${KUBECTL} delete job leaftaps-test-job-g2 -n leaftaps --ignore-not-found=true
-                            cp Leaftaps/k8s/test-job.yaml Leaftaps/k8s/test-job-g2.yaml
-                            
-                            sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job-g2.yaml
-                            sed -i "s/name: leaftaps-test-job/name: leaftaps-test-job-g2/" Leaftaps/k8s/test-job-g2.yaml
-                            sed -i "s#/tmp/surefire-reports#/tmp/surefire-reports-g2#" Leaftaps/k8s/test-job-g2.yaml
-                            sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"src/test/resources/suites/group2.xml\\"#" Leaftaps/k8s/test-job-g2.yaml
-                            
-                            docker cp Leaftaps/k8s/test-job-g2.yaml minikube:/test-job-g2.yaml
-                            ${KUBECTL} apply -f /test-job-g2.yaml
-
-                            # Same fast-exit poll as Group 1 — see its comment for why this
-                            # replaces 'kubectl wait --for=condition=complete'.
-                            for i in $(seq 1 60); do
-                                STATUS=$(${KUBECTL} get job/leaftaps-test-job-g2 -n leaftaps -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
-                                if [ "$STATUS" = "Complete" ] || [ "$STATUS" = "Failed" ]; then
-                                    echo "Group 2 job reached status: $STATUS after ${i}0s"
-                                    break
-                                fi
-                                sleep 10
-                            done
-
-                            mkdir -p Leaftaps/target/group2
-                            docker exec minikube tar -c -C /tmp surefire-reports-g2 | tar -x -C Leaftaps/target/group2 --strip-components=0
-                        '''
-                    }
-                }
+                    mkdir -p Leaftaps/target
+                    docker exec minikube tar -c -C /tmp surefire-reports | tar -x -C Leaftaps/target
+                '''
             }
         }
     }
@@ -163,21 +135,14 @@ pipeline {
             echo "FETCHING KUBERNETES POD LOGS FOR DEBUGGING..."
             echo "======================================================="
             sh '''
-                echo "--- GROUP 1 LOGS ---"
-                ${KUBECTL} logs -l job-name=leaftaps-test-job-g1 -n leaftaps --tail=200 || echo "Could not fetch G1 logs"
-                
-                echo "--- GROUP 2 LOGS ---"
-                ${KUBECTL} logs -l job-name=leaftaps-test-job-g2 -n leaftaps --tail=200 || echo "Could not fetch G2 logs"
+                ${KUBECTL} logs -l job-name=leaftaps-test-job -n leaftaps --tail=200 || echo "Could not fetch logs"
             '''
             echo "======================================================="
 
-            junit allowEmptyResults: true, testResults: 'Leaftaps/target/group*/surefire-reports*/*.xml'
-            archiveArtifacts artifacts: 'Leaftaps/target/group*/**', allowEmptyArchive: true
-            
-            sh '''
-                ${KUBECTL} delete job leaftaps-test-job-g1 -n leaftaps --ignore-not-found=true
-                ${KUBECTL} delete job leaftaps-test-job-g2 -n leaftaps --ignore-not-found=true
-            '''
+            junit allowEmptyResults: true, testResults: 'Leaftaps/target/surefire-reports/*.xml'
+            archiveArtifacts artifacts: 'Leaftaps/target/surefire-reports/**', allowEmptyArchive: true
+
+            sh '${KUBECTL} delete job leaftaps-test-job -n leaftaps --ignore-not-found=true'
         }
         success { echo 'Pipeline complete — Leaftaps suite passed.' }
         failure { echo 'Pipeline failed — check Console Output and archived surefire-reports.' }
