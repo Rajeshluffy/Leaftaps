@@ -57,12 +57,20 @@ spec:
               value: "true"
             - name: SUITE_FILE
               value: "src/test/resources/suites/regression.xml"
+          # CPU raised from 2 -> 3 (out of the node's 4 total): two concurrent
+          # Chrome instances were CPU-starved under the old 2-CPU cap, causing
+          # "unable to connect to renderer" / "invalid session id" even with
+          # plenty of host RAM free — this pod's limit was the bottleneck, not
+          # the host. Memory left at 4Gi (not raised further): this same
+          # minikube container already crashed once (exit 137) on this node,
+          # and etcd/apiserver/kubelet/containerd all run inside that same
+          # 6GB node alongside this pod — leave them real headroom.
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "1"
+              memory: "1.5Gi"
             limits:
-              cpu: "2"
+              cpu: "3"
               memory: "4Gi"
           volumeMounts:
             - name: test-reports
