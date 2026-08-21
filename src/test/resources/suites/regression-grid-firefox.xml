@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!--
+    Firefox counterpart to regression-grid-chrome.xml — same reasoning
+    applies (parallel="none", maxPoolSize=1, one session against the single
+    Firefox node in k8s/selenium-grid.yaml). Run alongside the Chrome grid
+    suite as two separate executions for real cross-browser parallel
+    coverage; do not merge them into one suite.
+-->
+<suite name="Regression Test Suite (Grid - Firefox)" parallel="none" verbose="2">
+    <parameter name="configClass" value="com.leaftaps.config.data.LeafTapConfiguration"/>
+    <parameter name="environment" value="qa"/>
+    <parameter name="browser" value="GRID_FIREFOX"/>
+    <parameter name="gridHubUrl" value="http://selenium-hub.selenium-grid.svc.cluster.local:4444"/>
+    <parameter name="maxPoolSize" value="1"/>
+    <parameter name="headless" value="true"/>
+    <test name="Full Regression - Grid Firefox">
+        <classes>
+            <class name="com.leaftaps.testcases.TC001_Verify"/>
+            <class name="com.leaftaps.testcases.TC001_VerifyLogin"/>
+            <class name="com.leaftaps.testcases.TC002_VerifyLogout"/>
+            <class name="com.leaftaps.testcases.TC003_CreateLead"/>
+            <class name="com.leaftaps.testcases.TC004_EditLead"/>
+            <class name="com.leaftaps.testcases.TC005_DeleteLead"/>
+            <class name="com.leaftaps.testcases.TC006_DuplicateLead"/>
+        </classes>
+    </test>
+</suite>

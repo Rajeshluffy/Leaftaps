@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!--
+    Runs the regression suite against Selenium Grid's Chrome node
+    (k8s/selenium-grid.yaml) instead of launching Chrome locally in the test
+    pod. browser=GRID_CHROME routes through RemoteGridBrowser via
+    BrowserRegistry — see autoframex-selenium's BrowserRegistry.java.
+
+    parallel="none" / maxPoolSize=1 deliberately: the deployed Grid has
+    SE_NODE_MAX_SESSIONS=1 on its single Chrome node replica, so a second
+    concurrent session would just queue at the Grid, not actually run in
+    parallel. Run this suite and regression-grid-firefox.xml side by side
+    (two separate Jenkins/local runs) for real cross-browser parallelism
+    instead of trying to parallelize within one browser here.
+
+    gridHubUrl resolves via GRID_HUB_URL env var, TestNG "gridHubUrl"
+    parameter, or autoFrameX.grid.hub.url in frameworkConfig.properties (see
+    ProjectDirector.java's resolve() priority chain). Value below is the
+    in-cluster DNS name for the Hub Service when running as a K8s Job in the
+    same minikube — override via -DgridHubUrl=... for a local (non-pod) run.
+-->
+<suite name="Regression Test Suite (Grid - Chrome)" parallel="none" verbose="2">
+    <parameter name="configClass" value="com.leaftaps.config.data.LeafTapConfiguration"/>
+    <parameter name="environment" value="qa"/>
+    <parameter name="browser" value="GRID_CHROME"/>
+    <parameter name="gridHubUrl" value="http://selenium-hub.selenium-grid.svc.cluster.local:4444"/>
+    <parameter name="maxPoolSize" value="1"/>
+    <parameter name="headless" value="true"/>
+    <test name="Full Regression - Grid Chrome">
+        <classes>
+            <class name="com.leaftaps.testcases.TC001_Verify"/>
+            <class name="com.leaftaps.testcases.TC001_VerifyLogin"/>
+            <class name="com.leaftaps.testcases.TC002_VerifyLogout"/>
+            <class name="com.leaftaps.testcases.TC003_CreateLead"/>
+            <class name="com.leaftaps.testcases.TC004_EditLead"/>
+            <class name="com.leaftaps.testcases.TC005_DeleteLead"/>
+            <class name="com.leaftaps.testcases.TC006_DuplicateLead"/>
+        </classes>
+    </test>
+</suite>
