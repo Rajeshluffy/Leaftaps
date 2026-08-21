@@ -30,7 +30,7 @@ public class ViewLeadPage extends ProjectSpecificMethods {
 	}
 	public MyLeadsPage clickDeleteLeadLink(){
 		waitForPageAndApiReady();
-		waitForClickable(locateElement(Locators.LINK_TEXT,"Delete"));
+		click(waitForClickable(locateElement(Locators.LINK_TEXT,"Delete")));
 		reportStep(" Clicked on DeleteLead Button", "pass");
 
 		return new MyLeadsPage();

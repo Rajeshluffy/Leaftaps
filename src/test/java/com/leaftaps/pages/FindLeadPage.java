@@ -46,7 +46,7 @@ public class FindLeadPage extends ProjectSpecificMethods{
 
 	public ViewLeadPage clickFirstResultingLead(){
 		waitForPageAndApiReady();
-		waitForClickable(locateElement(Locators.XPATH,"(//div[@class='x-grid3-cell-inner x-grid3-col-partyId']/a)[1]"));
+		click(waitForClickable(locateElement(Locators.XPATH,"(//div[@class='x-grid3-cell-inner x-grid3-col-partyId']/a)[1]")));
 		reportStep("FirstResultingLead Id is clicke", "pass");
 		return new ViewLeadPage();
 	}
