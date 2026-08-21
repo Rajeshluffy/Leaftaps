@@ -39,11 +39,13 @@ public class FindLeadPage extends ProjectSpecificMethods{
 	}
 	
 	
-	public String getFirstResultingLead(){	
+	public String getFirstResultingLead(){
+		waitForPageAndApiReady();
 		return 	getElementText(locateElement(Locators.XPATH,"(//div[@class='x-grid3-cell-inner x-grid3-col-partyId']/a)[1]"));
 	}
-	
+
 	public ViewLeadPage clickFirstResultingLead(){
+		waitForPageAndApiReady();
 		click(locateElement(Locators.XPATH,"(//div[@class='x-grid3-cell-inner x-grid3-col-partyId']/a)[1]"));
 		reportStep("FirstResultingLead Id is clicke", "pass");
 		return new ViewLeadPage();
