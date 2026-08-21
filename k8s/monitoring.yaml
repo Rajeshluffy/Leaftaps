@@ -1,0 +1,298 @@
+# Prometheus + Pushgateway + Grafana — test-outcome trend dashboards.
+#
+# Standing infra, same pattern as k8s/selenium-grid.yaml: deployed once,
+# separate namespace, left running. The test-job Pod itself pushes its
+# results here at the end of every run (see k8s/test-job.yaml's entrypoint) —
+# it does NOT need Jenkinsfile changes, since the push happens from inside
+# the pod before it exits.
+#
+# Why Pushgateway, not a direct Prometheus scrape target: leaftaps-test-job
+# is a short-lived batch Job (runs ~1-2min, then the Pod is gone) — there's
+# nothing for Prometheus to scrape *during* the run. Pushgateway sits in the
+# middle: the test pod pushes once at the end, Prometheus scrapes the
+# Pushgateway on its own interval (15s here) and keeps whatever it saw as a
+# permanent point in its own time-series DB.
+#
+# Known trade-off, deliberately accepted for this practice environment: each
+# push uses a unique `instance` label (`date +%s` from the entrypoint), so
+# every historical build's data survives in Pushgateway forever rather than
+# being overwritten by the next run — but that also means Pushgateway's own
+# memory grows unbounded as build count grows over time. Fine for a learning
+# lab; a production setup would restart/clear Pushgateway periodically or
+# swap to a Prometheus remote-write pattern instead.
+#
+# Sizing: kept as lean as selenium-grid.yaml for the same reason — this
+# minikube node is 4 CPU / 6GB total and has already OOM-crashed once this
+# session under combined load.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: 'pushgateway'
+        honor_labels: true
+        static_configs:
+          - targets: ['pushgateway:9091']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.retention.time=30d
+          ports:
+            - containerPort: 9090
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "200Mi"
+            limits:
+              cpu: "500m"
+              memory: "400Mi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pushgateway
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pushgateway
+  template:
+    metadata:
+      labels:
+        app: pushgateway
+    spec:
+      containers:
+        - name: pushgateway
+          image: prom/pushgateway:v1.9.0
+          ports:
+            - containerPort: 9091
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pushgateway
+  namespace: monitoring
+spec:
+  selector:
+    app: pushgateway
+  ports:
+    - port: 9091
+      targetPort: 9091
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        uid: prometheus
+        url: http://prometheus:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: monitoring
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: leaftaps
+        folder: Leaftaps
+        type: file
+        options:
+          path: /etc/grafana/provisioning/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-leaftaps
+  namespace: monitoring
+data:
+  leaftaps-test-outcomes.json: |
+    {
+      "title": "Leaftaps Test Outcomes",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "panels": [
+        {
+          "id": 1,
+          "title": "Test Outcomes Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "leaftaps_test_passed",
+              "legendFormat": "passed [{{suite}}]",
+              "refId": "A"
+            },
+            {
+              "expr": "leaftaps_test_failed",
+              "legendFormat": "failed [{{suite}}]",
+              "refId": "B"
+            },
+            {
+              "expr": "leaftaps_test_skipped",
+              "legendFormat": "skipped [{{suite}}]",
+              "refId": "C"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Latest Run — Passed",
+          "type": "stat",
+          "gridPos": { "h": 6, "w": 8, "x": 0, "y": 10 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "leaftaps_test_passed", "legendFormat": "{{suite}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Latest Run — Failed",
+          "type": "stat",
+          "gridPos": { "h": 6, "w": 8, "x": 8, "y": 10 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "leaftaps_test_failed", "legendFormat": "{{suite}}", "refId": "A" }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Latest Run — Duration (s)",
+          "type": "stat",
+          "gridPos": { "h": 6, "w": 8, "x": 16, "y": 10 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "leaftaps_test_duration_seconds", "legendFormat": "{{suite}}", "refId": "A" }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          ports:
+            - containerPort: 3000
+          env:
+            # Local practice lab only — change/remove before this ever sees
+            # a network wider than one developer's own minikube.
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "admin"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "150Mi"
+            limits:
+              cpu: "500m"
+              memory: "300Mi"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboard-json
+              mountPath: /etc/grafana/provisioning/dashboards/leaftaps-test-outcomes.json
+              subPath: leaftaps-test-outcomes.json
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboard-json
+          configMap:
+            name: grafana-dashboard-leaftaps
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000

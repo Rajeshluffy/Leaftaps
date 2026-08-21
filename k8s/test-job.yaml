@@ -47,13 +47,56 @@ spec:
             - |
               mkdir -p /app/Leaftaps/data
               cp /mnt/secrets/* /app/Leaftaps/data/
+              START_TS=$(date +%s)
               mvn test -Dsurefire.suiteXmlFiles=${SUITE_FILE}
               TEST_EXIT=$?
+              END_TS=$(date +%s)
               # ExtentReportManager writes each run into a timestamped subfolder
               # (e.g. "reports/20-Aug-2026 21-32-56/"). Rename it to a fixed path
               # so Jenkins' publishHTML step can point at a stable reportDir
               # instead of a different folder name every build.
               find reports -mindepth 1 -maxdepth 1 -type d -exec mv {} reports/latest \; 2>/dev/null || true
+
+              # Push this run's outcome to the Prometheus Pushgateway (see
+              # k8s/monitoring.yaml). Sums Surefire's own per-class TEST-*.xml
+              # files rather than trying testng-results.xml — these are the
+              # exact files the Jenkinsfile's `junit` step already relies on
+              # existing every run, so parsing them carries no extra risk.
+              # Never fails the build: metrics are observability, not a gate.
+              TOTAL=0; FAILURES=0; ERRORS=0; SKIPPED=0
+              for f in target/surefire-reports/TEST-*.xml; do
+                [ -f "$f" ] || continue
+                line=$(grep -m1 '<testsuite' "$f")
+                t=$(echo "$line" | sed -n 's/.*tests="\([0-9]*\)".*/\1/p')
+                fl=$(echo "$line" | sed -n 's/.*failures="\([0-9]*\)".*/\1/p')
+                er=$(echo "$line" | sed -n 's/.*errors="\([0-9]*\)".*/\1/p')
+                sk=$(echo "$line" | sed -n 's/.*skipped="\([0-9]*\)".*/\1/p')
+                TOTAL=$((TOTAL + ${t:-0}))
+                FAILURES=$((FAILURES + ${fl:-0}))
+                ERRORS=$((ERRORS + ${er:-0}))
+                SKIPPED=$((SKIPPED + ${sk:-0}))
+              done
+              FAILED=$((FAILURES + ERRORS))
+              PASSED=$((TOTAL - FAILED - SKIPPED))
+              SUITE_NAME=$(basename "${SUITE_FILE}" .xml)
+              PUSH_URL="http://pushgateway.monitoring.svc.cluster.local:9091/metrics/job/leaftaps_tests/suite/${SUITE_NAME}/instance/$(date +%s)"
+              METRICS_FILE=$(mktemp)
+              {
+                echo "# TYPE leaftaps_test_total gauge"
+                echo "leaftaps_test_total ${TOTAL}"
+                echo "# TYPE leaftaps_test_passed gauge"
+                echo "leaftaps_test_passed ${PASSED}"
+                echo "# TYPE leaftaps_test_failed gauge"
+                echo "leaftaps_test_failed ${FAILED}"
+                echo "# TYPE leaftaps_test_skipped gauge"
+                echo "leaftaps_test_skipped ${SKIPPED}"
+                echo "# TYPE leaftaps_test_duration_seconds gauge"
+                echo "leaftaps_test_duration_seconds $((END_TS - START_TS))"
+              } > "${METRICS_FILE}"
+              wget -q -O- --method=PUT --body-file="${METRICS_FILE}" "${PUSH_URL}" 2>/dev/null \
+                || echo "WARN: metrics push to Pushgateway failed (non-fatal)"
+              rm -f "${METRICS_FILE}"
+
               exit $TEST_EXIT
           # BROWSER/ENVIRONMENT/HEADLESS/SUITE_FILE come from the
           # leaftaps-test-config ConfigMap (k8s/test-config.yaml) instead of
