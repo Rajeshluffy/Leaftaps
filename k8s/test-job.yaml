@@ -48,6 +48,13 @@ spec:
               mkdir -p /app/Leaftaps/data
               cp /mnt/secrets/* /app/Leaftaps/data/
               mvn test -Dsurefire.suiteXmlFiles=${SUITE_FILE}
+              TEST_EXIT=$?
+              # ExtentReportManager writes each run into a timestamped subfolder
+              # (e.g. "reports/20-Aug-2026 21-32-56/"). Rename it to a fixed path
+              # so Jenkins' publishHTML step can point at a stable reportDir
+              # instead of a different folder name every build.
+              find reports -mindepth 1 -maxdepth 1 -type d -exec mv {} reports/latest \; 2>/dev/null || true
+              exit $TEST_EXIT
           env:
             - name: BROWSER
               value: "chrome"
@@ -75,6 +82,12 @@ spec:
           volumeMounts:
             - name: test-reports
               mountPath: /app/Leaftaps/target/surefire-reports
+            # ExtentReports HTML output — separate hostPath so it survives pod
+            # deletion the same way surefire-reports already does. Previously
+            # unmounted: written to the pod's own ephemeral filesystem and lost
+            # forever once the Job was cleaned up.
+            - name: extent-reports
+              mountPath: /app/Leaftaps/reports
             # 1. Mount secrets to a temporary read-only path
             - name: leaftaps-data-temp
               mountPath: /mnt/secrets
@@ -89,6 +102,12 @@ spec:
         - name: test-reports
           hostPath:
             path: /tmp/surefire-reports
+            type: DirectoryOrCreate
+        # hostPath for ExtentReports HTML — Jenkinsfile pulls it out via
+        # `docker exec minikube tar -c -C /tmp extent-reports`.
+        - name: extent-reports
+          hostPath:
+            path: /tmp/extent-reports
             type: DirectoryOrCreate
         - name: leaftaps-data-temp
           secret:

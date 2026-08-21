@@ -129,6 +129,7 @@ pipeline {
 
                     mkdir -p Leaftaps/target
                     docker exec minikube tar -c -C /tmp surefire-reports | tar -x -C Leaftaps/target
+                    docker exec minikube tar -c -C /tmp extent-reports | tar -x -C Leaftaps/target
                 '''
             }
         }
@@ -147,6 +148,20 @@ pipeline {
 
             junit allowEmptyResults: true, testResults: 'Leaftaps/target/surefire-reports/*.xml'
             archiveArtifacts artifacts: 'Leaftaps/target/surefire-reports/**', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'Leaftaps/target/extent-reports/**', allowEmptyArchive: true
+
+            // Requires the HTML Publisher plugin (Manage Jenkins > Plugins).
+            // extent-reports/latest is a fixed name the pod's entrypoint renames
+            // the timestamped ExtentReportManager output to (see k8s/test-job.yaml)
+            // so this reportDir stays valid across every build.
+            publishHTML target: [
+                reportDir: 'Leaftaps/target/extent-reports/latest',
+                reportFiles: 'Regression_Test_Suite.html',
+                reportName: 'Extent Report',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ]
 
             sh '${KUBECTL} delete job leaftaps-test-job -n leaftaps --ignore-not-found=true'
         }
