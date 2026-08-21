@@ -97,8 +97,12 @@ pipeline {
             steps {
                 sh '''
                     ${KUBECTL} delete job leaftaps-test-job -n leaftaps --ignore-not-found=true
+
+                    sed -i "s/BROWSER: \\"chrome\\"/BROWSER: \\"${BROWSER}\\"/;s/ENVIRONMENT: \\"qa\\"/ENVIRONMENT: \\"${ENVIRONMENT}\\"/;s/HEADLESS: \\"true\\"/HEADLESS: \\"${HEADLESS}\\"/;s#SUITE_FILE: \\"src/test/resources/suites/regression.xml\\"#SUITE_FILE: \\"${SUITE_FILE}\\"#" Leaftaps/k8s/test-config.yaml
+                    docker cp Leaftaps/k8s/test-config.yaml minikube:/test-config.yaml
+                    ${KUBECTL} apply -f /test-config.yaml
+
                     sed -i "s/leaftaps-tests:latest/leaftaps-tests:${BUILD_ID}/g" Leaftaps/k8s/test-job.yaml
-                    sed -i "s/value: \\"chrome\\"/value: \\"${BROWSER}\\"/;s/value: \\"qa\\"/value: \\"${ENVIRONMENT}\\"/;s/value: \\"true\\"/value: \\"${HEADLESS}\\"/;s#value: \\"src/test/resources/suites/regression.xml\\"#value: \\"${SUITE_FILE}\\"#" Leaftaps/k8s/test-job.yaml
                     docker cp Leaftaps/k8s/test-job.yaml minikube:/test-job.yaml
                     ${KUBECTL} apply -f /test-job.yaml
                 '''

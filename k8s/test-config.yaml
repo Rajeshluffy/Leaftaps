@@ -1,0 +1,18 @@
+# Non-secret runtime config for the leaftaps-test-job pod.
+#
+# Values below are defaults for a local `kubectl apply -f k8s/` run. The
+# Jenkinsfile overwrites this file's data values (sed) with the build's actual
+# BROWSER/ENVIRONMENT/HEADLESS/SUITE_FILE parameters before applying it, the
+# same way it already rewrites test-job.yaml's image tag — this just moves
+# per-run config out of the Job spec into its own object, matching the k8s
+# convention of ConfigMap-for-config vs Secret-for-credentials.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: leaftaps-test-config
+  namespace: leaftaps
+data:
+  BROWSER: "chrome"
+  ENVIRONMENT: "qa"
+  HEADLESS: "true"
+  SUITE_FILE: "src/test/resources/suites/regression.xml"
